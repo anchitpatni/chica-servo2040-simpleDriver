@@ -46,6 +46,9 @@ When the hexapod is powered down, the application will de-assert the servo power
 
 For redundancy, the application will also disable PWM signal outputs on all servos, which effectively disables the servos by removing torque. This has the added benefit of making a physical servo power relay for the hexapod optional. 
 
+### Configurable Servo PWM Frequency
+Register 29 sets the servo PWM frequency in Hz using a 14-bit value and is only honored before the servo relay is enabled. Values outside the 50-333Hz range are ignored. The frequency can be read back with GET, and the boot default is 100Hz.
+
 ### Tools
 The Chica server application requires servo calibration values as input to its config.txt file to improve servo positioning accuracy as demonstrated in MYP's [servo calibration video](https://www.youtube.com/watch?v=UMUeKFPptU4).
 

@@ -12,7 +12,7 @@ using namespace servo;
 const int START_PIN = servo2040::SERVO_1;
 const int END_PIN = servo2040::SERVO_18;
 const int NUM_SERVOS = (END_PIN - START_PIN) + 1;
-ServoCluster servos = ServoCluster(pio0, 0, START_PIN, NUM_SERVOS);
+ServoCluster servos = ServoCluster(pio0, 0, START_PIN, NUM_SERVOS, ANGULAR, DEFAULT_SERVO_FREQUENCY);
 
 /* Set up the shared analog inputs */
 Analog sen_adc = Analog(servo2040::SHARED_ADC);
@@ -129,8 +129,16 @@ void parse_and_command_task(void)
 			{
 				for (uint idx = 0; idx < curr_cmdPkt.count; idx++, curr_cmdPkt.startIdx++)
 				{
+					if (curr_cmdPkt.startIdx == PWM_FREQUENCY)
+					{
+						uint frequency = curr_cmdPkt.valueBuff[idx];
+						if (!servoEnabled && frequency >= MIN_SERVO_FREQUENCY && frequency <= MAX_SERVO_FREQUENCY)
+						{
+							servos.frequency((float)frequency);
+						}
+					}
 					// startIdx is servo
-					if (curr_cmdPkt.startIdx <= SERVO18)
+					else if (curr_cmdPkt.startIdx <= SERVO18)
 					{
 						servos.pulse(cmdPin_to_hardwarePin((cmdPins)curr_cmdPkt.startIdx),
 									 						curr_cmdPkt.valueBuff[idx], servoEnabled);
@@ -167,8 +175,15 @@ void parse_and_command_task(void)
 
 				for (uint idx = 0; idx < curr_cmdPkt.count; idx++, curr_cmdPkt.startIdx++)
 				{
+					if (curr_cmdPkt.startIdx == PWM_FREQUENCY)
+					{
+						uint frequency = round(servos.frequency());
+						tx[0] = frequency & 0x7F;
+						tx[1] = (frequency >> 7) & 0x7F;
+						vcp_transmit(tx, 2);
+					}
 					// startIdx is servo
-					if (curr_cmdPkt.startIdx <= SERVO18)
+					else if (curr_cmdPkt.startIdx <= SERVO18)
 					{
 						uint pwmValue = 0;
 						uint mappedPin = cmdPin_to_hardwarePin((cmdPins)curr_cmdPkt.startIdx);
