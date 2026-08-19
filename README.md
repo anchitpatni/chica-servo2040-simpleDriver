@@ -47,7 +47,65 @@ When the hexapod is powered down, the application will de-assert the servo power
 For redundancy, the application will also disable PWM signal outputs on all servos, which effectively disables the servos by removing torque. This has the added benefit of making a physical servo power relay for the hexapod optional. 
 
 ### Configurable Servo PWM Frequency
-Register 29 sets the servo PWM frequency in Hz using a 14-bit value and is only honored before the servo relay is enabled. Values outside the 50-333Hz range are ignored. The frequency can be read back with GET, and the boot default is 100Hz.
+The servo PWM frequency defaults to 100Hz at boot and can be changed by the host over the existing Chica protocol, using register (pin index) **29**. No other register or command is affected.
+
+#### Encoding
+Register 29 carries the frequency in Hz as a plain 14-bit value, split into two 7-bit bytes exactly like every other value in the protocol:
+
+```
+byte0 = freq & 0x7F          // low 7 bits
+byte1 = (freq >> 7) & 0x7F   // high 7 bits
+```
+
+#### Setting the frequency
+Send a SET of one value at index 29 immediately after opening the serial port, and before enabling the servo power relay:
+
+```
+0xD3, 0x1D, 0x01, <freq_lo>, <freq_hi>
+ SET   reg 29  count=1
+```
+
+| Frequency | Bytes to send |
+| --- | --- |
+| 50Hz | `D3 1D 01 32 00` |
+| 100Hz (default) | `D3 1D 01 64 00` |
+| 200Hz | `D3 1D 01 48 01` |
+| 333Hz (max) | `D3 1D 01 4D 02` |
+
+#### Reading the frequency back
+SET is not acknowledged, so read the register back to confirm the board accepted it:
+
+```
+host  -> 0xC7, 0x1D, 0x01               // GET reg 29, count=1
+board -> 0xC7, 0x1D, 0x01, <lo>, <hi>   // echoed header, then the active frequency
+```
+
+The value returned is the frequency currently programmed into the PWM cluster, so if the SET was rejected the reply still shows the previous frequency.
+
+#### Example (Python, host side)
+```python
+import serial
+
+port = serial.Serial("/dev/ttyACM0")           # /dev/tty.usbmodem* on macOS
+
+def set_frequency(hz):
+    port.write(bytes([0xD3, 29, 1, hz & 0x7F, (hz >> 7) & 0x7F]))
+
+def get_frequency():
+    port.write(bytes([0xC7, 29, 1]))
+    reply = port.read(5)                        # 3-byte header + 2-byte value
+    return reply[3] | (reply[4] << 7)
+
+set_frequency(200)
+assert get_frequency() == 200
+port.write(bytes([0xD3, 26, 1, 1, 0]))          # only now enable the relay (register 26)
+```
+
+#### Rules and limitations
+- **Order matters**: the write is only honored while the servo relay is disabled. Once register 26 (RELAY) has been set to a nonzero value the frequency cannot be changed, so send register 29 first.
+- **Range is 50Hz to 333Hz**; values outside that range are silently ignored, not clamped.
+- **Nothing is persisted**: the frequency resets to 100Hz on every reset or power cycle, so the host must send it on each boot. Closing and reopening the serial port does not reset the board, so the setting survives a plain reconnect.
+- **Stock hosts are unaffected**: a host that never sends register 29 simply runs at the 100Hz default.
 
 ### Tools
 The Chica server application requires servo calibration values as input to its config.txt file to improve servo positioning accuracy as demonstrated in MYP's [servo calibration video](https://www.youtube.com/watch?v=UMUeKFPptU4).
