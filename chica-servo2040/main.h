@@ -36,12 +36,14 @@
  ******************************************************************************/
 /* Timing */
 constexpr uint GETC_TIMEOUT_US	= 100; // 10bits/115200bps = 86.8us acquire time
-constexpr float DEFAULT_SERVO_FREQUENCY	= 100.0f;
-constexpr uint MIN_SERVO_FREQUENCY		= 50;
-constexpr uint MAX_SERVO_FREQUENCY		= 333;
 
 /* LED */
 constexpr float BRIGHTNESS		= 0.3f;		// Normalized
+
+/* Servo */
+constexpr float DEFAULT_SERVO_FREQUENCY	= 100.0f;
+constexpr uint MIN_SERVO_FREQUENCY		= 50;
+constexpr uint MAX_SERVO_FREQUENCY		= 333;
 
 /* Ratios */
 constexpr float b1024_3_3V_RATIO	= 310.3f;
