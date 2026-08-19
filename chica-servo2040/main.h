@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <cstring>
 #include "pico/stdlib.h"
+#include "pico/stdio_usb.h"
 #include "servo2040.hpp"
 #include "analogmux.hpp"
 #include "analog.hpp"
@@ -35,6 +36,9 @@
  ******************************************************************************/
 /* Timing */
 constexpr uint GETC_TIMEOUT_US	= 100; // 10bits/115200bps = 86.8us acquire time
+constexpr float DEFAULT_SERVO_FREQUENCY	= 100.0f;
+constexpr uint MIN_SERVO_FREQUENCY		= 50;
+constexpr uint MAX_SERVO_FREQUENCY		= 333;
 
 /* LED */
 constexpr float BRIGHTNESS		= 0.3f;		// Normalized
@@ -52,7 +56,7 @@ typedef enum {
 	SERVO7, SERVO8, SERVO9, SERVO10, SERVO11, SERVO12, 
 	SERVO13, SERVO14, SERVO15, SERVO16, SERVO17, SERVO18,
 	TS1, TS2, TS3, TS4, TS5, TS6, 
-	CURR, VOLT, RELAY, A1, A2, cmdPin_num
+	CURR, VOLT, RELAY, A1, A2, PWM_FREQUENCY, cmdPin_num
 } cmdPins;
 
 typedef enum {

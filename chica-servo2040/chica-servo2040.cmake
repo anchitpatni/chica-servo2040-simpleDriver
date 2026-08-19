@@ -3,6 +3,7 @@ add_executable(${OUTPUT_NAME} chica-servo2040.cpp)
 
 target_link_libraries(${OUTPUT_NAME}
         pico_stdlib
+        pico_stdio_usb
         servo2040
         analogmux
         analog
