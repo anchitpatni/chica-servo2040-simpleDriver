@@ -46,6 +46,9 @@ When the hexapod is powered down, the application will de-assert the servo power
 
 For redundancy, the application will also disable PWM signal outputs on all servos, which effectively disables the servos by removing torque. This has the added benefit of making a physical servo power relay for the hexapod optional. 
 
+### Servo Setpoint Interpolation
+While enabled, servo setpoints ramp linearly between host updates at the PWM frame rate. Changes larger than 50 microseconds, startup moves, and moves made while disabled snap directly to the requested value.
+
 ### Configurable Servo PWM Frequency
 The servo PWM frequency defaults to 100Hz at boot and can be changed by the host over the existing Chica protocol, using register (pin index) **29**. No other register or command is affected.
 

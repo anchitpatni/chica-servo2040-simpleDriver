@@ -13,6 +13,15 @@ const int START_PIN = servo2040::SERVO_1;
 const int END_PIN = servo2040::SERVO_18;
 const int NUM_SERVOS = (END_PIN - START_PIN) + 1;
 ServoCluster servos = ServoCluster(pio0, 0, START_PIN, NUM_SERVOS, ANGULAR, DEFAULT_SERVO_FREQUENCY);
+float interp_current[NUM_SERVOS] = {};
+float interp_start[NUM_SERVOS] = {};
+float interp_target[NUM_SERVOS] = {};
+uint64_t interp_start_us[NUM_SERVOS] = {};
+bool interp_active[NUM_SERVOS] = {};
+bool interp_has_current[NUM_SERVOS] = {};
+uint64_t last_set_us = 0;
+uint32_t ramp_duration_us = DEFAULT_RAMP_US;
+uint64_t last_frame_us = 0;
 
 /* Set up the shared analog inputs */
 Analog sen_adc = Analog(servo2040::SHARED_ADC);
@@ -28,6 +37,26 @@ AnalogMux mux = AnalogMux(servo2040::ADC_ADDR_0, servo2040::ADC_ADDR_1, servo204
 WS2812 led_bar(servo2040::NUM_LEDS, pio1, 0, servo2040::LED_DATA);
 
 uint servoEnabled = false;
+
+float current_output(uint idx)
+{
+	if (!interp_active[idx])
+	{
+		return interp_current[idx];
+	}
+
+	float t = (float)(time_us_64() - interp_start_us[idx]) / (float)ramp_duration_us;
+	if (t < 0.0f)
+	{
+		t = 0.0f;
+	}
+	else if (t > 1.0f)
+	{
+		t = 1.0f;
+	}
+
+	return interp_start[idx] + (interp_target[idx] - interp_start[idx]) * t;
+}
 
 int main()
 {
@@ -63,6 +92,7 @@ int main()
 	{
 		/* Monitor and parse serial data */
 		parse_and_command_task();
+		servo_interpolation_task();
 
 	} // while(1)
 }
@@ -127,6 +157,7 @@ void parse_and_command_task(void)
 			/***************************** RUN COMMAND *************************************/
 			if (curr_cmdPkt.cmd == set)
 			{
+				bool servo_set_touched = false;
 				for (uint idx = 0; idx < curr_cmdPkt.count; idx++, curr_cmdPkt.startIdx++)
 				{
 					if (curr_cmdPkt.startIdx == PWM_FREQUENCY)
@@ -140,8 +171,29 @@ void parse_and_command_task(void)
 					// startIdx is servo
 					else if (curr_cmdPkt.startIdx <= SERVO18)
 					{
-						servos.pulse(cmdPin_to_hardwarePin((cmdPins)curr_cmdPkt.startIdx),
-									 						curr_cmdPkt.valueBuff[idx], servoEnabled);
+						uint servo_idx = curr_cmdPkt.startIdx;
+						uint pin = cmdPin_to_hardwarePin((cmdPins)servo_idx);
+						float value = (float)curr_cmdPkt.valueBuff[idx];
+						float output = current_output(servo_idx);
+						servo_set_touched = true;
+
+						if (!servoEnabled || !interp_has_current[servo_idx] ||
+							fabsf(value - output) > SNAP_THRESHOLD_US)
+						{
+							interp_current[servo_idx] = value;
+							interp_start[servo_idx] = value;
+							interp_target[servo_idx] = value;
+							interp_active[servo_idx] = false;
+							interp_has_current[servo_idx] = true;
+							servos.pulse(pin, value, servoEnabled);
+						}
+						else
+						{
+							interp_start[servo_idx] = output;
+							interp_target[servo_idx] = value;
+							interp_start_us[servo_idx] = time_us_64();
+							interp_active[servo_idx] = true;
+						}
 					}
 					// startIdx is A0/A1/A2
 					else if (curr_cmdPkt.startIdx >= RELAY)
@@ -162,11 +214,27 @@ void parse_and_command_task(void)
 							else
 							{
 								servos.disable_all();
+								for (uint idx = 0; idx < NUM_SERVOS; idx++)
+								{
+									interp_active[idx] = false;
+									interp_has_current[idx] = false;
+								}
 							}
 						}
 					}
 
 				} // for (auto idx = 0; idx < currCmd.count; idx++, currCmd.startIdx++)
+
+				if (servo_set_touched)
+				{
+					uint64_t now = time_us_64();
+					if (last_set_us != 0)
+					{
+						uint32_t interval = (uint32_t)(now - last_set_us);
+						ramp_duration_us = MIN(MAX(interval, MIN_RAMP_US), MAX_RAMP_US);
+					}
+					last_set_us = now;
+				}
 			}	  // if (currCmd.cmd == set)
 			else if (curr_cmdPkt.cmd == get)
 			{
@@ -185,9 +253,11 @@ void parse_and_command_task(void)
 					// startIdx is servo
 					else if (curr_cmdPkt.startIdx <= SERVO18)
 					{
-						uint pwmValue = 0;
+						uint servo_idx = curr_cmdPkt.startIdx;
 						uint mappedPin = cmdPin_to_hardwarePin((cmdPins)curr_cmdPkt.startIdx);
-						pwmValue = servos.pulse(mappedPin);
+						uint pwmValue = interp_has_current[servo_idx]
+										 ? (uint)roundf(interp_target[servo_idx])
+										 : (uint)servos.pulse(mappedPin);
 						tx[0] = pwmValue & 0x7F;
 						tx[1] = (pwmValue >> 7) & 0x7F;
 						vcp_transmit(tx, 2);
@@ -233,6 +303,54 @@ void parse_and_command_task(void)
 }
 /*******************************************************************************
  ******************************************************************************/
+
+void servo_interpolation_task(void)
+{
+	if (!servoEnabled)
+	{
+		return;
+	}
+
+	uint64_t now = time_us_64();
+	uint32_t frame_us = (uint32_t)(1000000.0f / servos.frequency());
+	if (now - last_frame_us < frame_us)
+	{
+		return;
+	}
+	last_frame_us = now;
+
+	bool updated = false;
+	for (uint idx = 0; idx < NUM_SERVOS; idx++)
+	{
+		if (interp_active[idx])
+		{
+			float t = (float)(now - interp_start_us[idx]) / (float)ramp_duration_us;
+			if (t < 0.0f)
+			{
+				t = 0.0f;
+			}
+			else if (t > 1.0f)
+			{
+				t = 1.0f;
+			}
+
+			float p = interp_start[idx] + (interp_target[idx] - interp_start[idx]) * t;
+			interp_current[idx] = p;
+			servos.pulse(cmdPin_to_hardwarePin((cmdPins)idx), p, false);
+			updated = true;
+
+			if (t >= 1.0f)
+			{
+				interp_active[idx] = false;
+			}
+		}
+	}
+
+	if (updated)
+	{
+		servos.load();
+	}
+}
 
 /*******************************************************************************
  * VCP/Parsing Support Functions
