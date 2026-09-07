@@ -17,6 +17,7 @@ float interp_current[NUM_SERVOS] = {};
 float interp_start[NUM_SERVOS] = {};
 float interp_target[NUM_SERVOS] = {};
 uint64_t interp_start_us[NUM_SERVOS] = {};
+uint32_t interp_duration_us[NUM_SERVOS] = {};
 bool interp_active[NUM_SERVOS] = {};
 bool interp_has_current[NUM_SERVOS] = {};
 uint64_t last_set_us = 0;
@@ -38,31 +39,16 @@ WS2812 led_bar(servo2040::NUM_LEDS, pio1, 0, servo2040::LED_DATA);
 
 uint servoEnabled = false;
 
-float current_output(uint idx)
-{
-	if (!interp_active[idx])
-	{
-		return interp_current[idx];
-	}
-
-	float t = (float)(time_us_64() - interp_start_us[idx]) / (float)ramp_duration_us;
-	if (t < 0.0f)
-	{
-		t = 0.0f;
-	}
-	else if (t > 1.0f)
-	{
-		t = 1.0f;
-	}
-
-	return interp_start[idx] + (interp_target[idx] - interp_start[idx]) * t;
-}
-
 int main()
 {
 	/*******************************************************************************
 	 * Initializations
 	 ******************************************************************************/
+	for (uint idx = 0; idx < NUM_SERVOS; idx++)
+	{
+		interp_duration_us[idx] = DEFAULT_RAMP_US;
+	}
+
 	/* Initialize the servo cluster */
 	servos.init();
 
@@ -174,24 +160,25 @@ void parse_and_command_task(void)
 						uint servo_idx = curr_cmdPkt.startIdx;
 						uint pin = cmdPin_to_hardwarePin((cmdPins)servo_idx);
 						float value = (float)curr_cmdPkt.valueBuff[idx];
-						float output = current_output(servo_idx);
 						servo_set_touched = true;
 
 						if (!servoEnabled || !interp_has_current[servo_idx] ||
-							fabsf(value - output) > SNAP_THRESHOLD_US)
+							fabsf(value - interp_current[servo_idx]) > SNAP_THRESHOLD_US)
 						{
-							interp_current[servo_idx] = value;
-							interp_start[servo_idx] = value;
-							interp_target[servo_idx] = value;
 							interp_active[servo_idx] = false;
-							interp_has_current[servo_idx] = true;
 							servos.pulse(pin, value, servoEnabled);
+							float accepted = servos.pulse(pin);
+							interp_current[servo_idx] = accepted;
+							interp_start[servo_idx] = accepted;
+							interp_target[servo_idx] = accepted;
+							interp_has_current[servo_idx] = true;
 						}
 						else
 						{
-							interp_start[servo_idx] = output;
+							interp_start[servo_idx] = interp_current[servo_idx];
 							interp_target[servo_idx] = value;
 							interp_start_us[servo_idx] = time_us_64();
+							interp_duration_us[servo_idx] = ramp_duration_us;
 							interp_active[servo_idx] = true;
 						}
 					}
@@ -324,7 +311,7 @@ void servo_interpolation_task(void)
 	{
 		if (interp_active[idx])
 		{
-			float t = (float)(now - interp_start_us[idx]) / (float)ramp_duration_us;
+			float t = (float)(now - interp_start_us[idx]) / (float)interp_duration_us[idx];
 			if (t < 0.0f)
 			{
 				t = 0.0f;
@@ -341,6 +328,9 @@ void servo_interpolation_task(void)
 
 			if (t >= 1.0f)
 			{
+				float accepted = servos.pulse(cmdPin_to_hardwarePin((cmdPins)idx));
+				interp_current[idx] = accepted;
+				interp_target[idx] = accepted;
 				interp_active[idx] = false;
 			}
 		}
