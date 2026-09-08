@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <cstring>
+#include <math.h>
 #include "pico/stdlib.h"
 #include "pico/stdio_usb.h"
 #include "servo2040.hpp"
@@ -44,6 +45,10 @@ constexpr float BRIGHTNESS		= 0.3f;		// Normalized
 constexpr float DEFAULT_SERVO_FREQUENCY	= 100.0f;
 constexpr uint MIN_SERVO_FREQUENCY		= 50;
 constexpr uint MAX_SERVO_FREQUENCY		= 333;
+constexpr float SNAP_THRESHOLD_US		= 50.0f;
+constexpr uint32_t MIN_RAMP_US			= 15000;
+constexpr uint32_t MAX_RAMP_US			= 40000;
+constexpr uint32_t DEFAULT_RAMP_US		= 20000;
 
 /* Ratios */
 constexpr float b1024_3_3V_RATIO	= 310.3f;
@@ -108,6 +113,10 @@ constexpr uint RP_hardwarePins_table[] =
  * Core Functions
  ******************************************************************************/
 void parse_and_command_task(
+void
+);
+
+void servo_interpolation_task(
 void
 );
 
